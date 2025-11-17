@@ -1,0 +1,190 @@
+version: '3'
+
+vars:
+  PROJECT_NAME: geniussports-event-processor
+  DOCKER_COMPOSE: docker-compose
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  install-tools:
+    desc: Install required development tools
+    cmds:
+      - |
+        if ! command -v golangci-lint &> /dev/null; then
+          echo "Installing golangci-lint..."
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+        else
+          echo "golangci-lint already installed"
+        fi
+    silent: true
+
+  lint:
+    desc: Run golangci-lint
+    deps: [install-tools]
+    cmds:
+      - golangci-lint run ./...
+
+  lint-fix:
+    desc: Run golangci-lint with auto-fix
+    deps: [install-tools]
+    cmds:
+      - golangci-lint run --fix ./...
+
+  build:
+    desc: Build Go binaries locally
+    cmds:
+      - echo "Building consumer..."
+      - go build -o consumer ./cmd/consumer
+      - echo "Building producer..."
+      - go build -o producer ./cmd/producer
+      - echo "✓ Build complete!"
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test -v ./...
+
+  test-coverage:
+    desc: Run tests with coverage
+    cmds:
+      - go test -v -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "Coverage report generated{{ ":" }} coverage.html"
+
+  docker-build:
+    desc: Build Docker images
+    cmds:
+      - echo "Building consumer Docker image..."
+      - docker build -t {{.PROJECT_NAME}}-consumer{{ ":" }}latest -f Dockerfile.consumer .
+      - echo "Building producer Docker image..."
+      - docker build -t {{.PROJECT_NAME}}-producer{{ ":" }}latest -f Dockerfile.producer .
+      - echo "✓ Docker images built successfully!"
+
+  docker-build-producer:
+    desc: Build producer Docker image only
+    cmds:
+      - docker build -t {{.PROJECT_NAME}}-producer{{ ":" }}latest -f Dockerfile.producer .
+
+  docker-build-consumer:
+    desc: Build consumer Docker image only
+    cmds:
+      - docker build -t {{.PROJECT_NAME}}-consumer{{ ":" }}latest -f Dockerfile.consumer .
+
+  up:
+    desc: Start services with docker-compose
+    cmds:
+      - "{{.DOCKER_COMPOSE}} up --build"
+
+  up-detached:
+    desc: Start services with docker-compose in detached mode
+    cmds:
+      - "{{.DOCKER_COMPOSE}} up --build -d"
+      - echo "Services started in background"
+      - echo "View logs{{ ":" }} task logs"
+
+  down:
+    desc: Stop docker-compose services
+    cmds:
+      - "{{.DOCKER_COMPOSE}} down"
+
+  down-clean:
+    desc: Stop docker-compose services and remove volumes
+    cmds:
+      - "{{.DOCKER_COMPOSE}} down -v"
+      - echo "✓ Services stopped and volumes removed"
+
+  logs:
+    desc: View docker-compose logs
+    cmds:
+      - "{{.DOCKER_COMPOSE}} logs -f"
+
+  logs-producer:
+    desc: View producer logs
+    cmds:
+      - "{{.DOCKER_COMPOSE}} logs -f producer"
+
+  logs-consumer:
+    desc: View consumer logs
+    cmds:
+      - "{{.DOCKER_COMPOSE}} logs -f consumer"
+
+  restart:
+    desc: Restart docker-compose services
+    cmds:
+      - "{{.DOCKER_COMPOSE}} restart"
+
+  redis-cli:
+    desc: Connect to Redis CLI
+    cmds:
+      - docker exec -it event-processor-redis redis-cli
+
+  clean:
+    desc: Clean up build artifacts
+    cmds:
+      - rm -f coverage.out coverage.html
+      - echo "✓ Cleaned build artifacts"
+
+  clean-all:
+    desc: Clean up everything including Docker
+    deps: [down-clean, clean]
+    cmds:
+      - docker rmi {{.PROJECT_NAME}}-consumer{{ ":" }}latest {{.PROJECT_NAME}}-producer{{ ":" }}latest 2>/dev/null || true
+      - echo "✓ Cleaned everything"
+
+  fmt:
+    desc: Format Go code
+    cmds:
+      - go fmt ./...
+      - echo "✓ Code formatted"
+
+  tidy:
+    desc: Tidy Go modules
+    cmds:
+      - go mod tidy
+      - echo "✓ Go modules tidied"
+
+  run-consumer:
+    desc: Run consumer locally
+    cmds:
+      - go run cmd/consumer/main.go -port 8080 -redis localhost:6379
+
+  run-producer:
+    desc: Run producer locally
+    cmds:
+      - go run cmd/producer/main.go -file PIT_LAC.txt -consumer http://localhost:8080 -speed 100ms
+
+  dev:
+    desc: Start development environment (Redis + Consumer)
+    cmds:
+      - |
+        if ! docker ps | grep -q event-processor-redis; then
+          echo "Starting Redis..."
+          docker run -d --name event-processor-redis -p 6379:6379 redis:7-alpine
+          sleep 2
+        fi
+        echo "Starting consumer..."
+        go run cmd/consumer/main.go -port 8080 -redis localhost:6379
+
+  ci:
+    desc: Run CI pipeline (lint, test, build)
+    cmds:
+      - task: tidy
+      - task: fmt
+      - task: lint
+      - task: test
+      - task: build
+      - echo "✓ CI pipeline complete!"
+
+  pre-commit:
+    desc: Run pre-commit checks
+    cmds:
+      - task: fmt
+      - task: lint-fix
+      - task: test
+      - echo "✓ Pre-commit checks passed!"
+
